@@ -70,9 +70,8 @@ router.get("/appointments", auth, async (req, res) => {
       { status: 'Expired' }
     );
 
-    const appointments = await Appointment.find({
-      status: { $nin: ['Expired'] } // Don't show expired appointments
-    })
+    // Get all appointments including expired ones
+    const appointments = await Appointment.find({})
       .populate('user_id', 'name email phone')
       .populate({
         path: 'doctor_id',
@@ -207,6 +206,98 @@ router.delete("/appointments/:id", auth, async (req, res) => {
   }
 });
 
+// ===== CREATE Appointment for User (Admin) =====
+router.post("/appointments", auth, async (req, res) => {
+  try {
+    // Check if user is admin
+    if (req.userRole !== "Admin") {
+      return res.status(403).json({ message: "Only admins can access this endpoint" });
+    }
+
+    const { user_id, doctor_id, date, time, symptoms, notes, status } = req.body;
+
+    // Validate required fields
+    if (!user_id || !doctor_id || !date || !time) {
+      return res.status(400).json({ message: "User ID, Doctor ID, date, and time are required" });
+    }
+
+    // Check if user exists
+    const user = await User.findById(user_id);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    // Check if doctor exists
+    const doctor = await Doctor.findById(doctor_id);
+    if (!doctor) {
+      return res.status(404).json({ message: "Doctor not found" });
+    }
+
+    // Check if appointment already exists for this time slot
+    const existingAppointment = await Appointment.findOne({
+      doctor_id,
+      date,
+      time,
+      status: { $in: ["Pending", "Confirmed"] }
+    });
+
+    if (existingAppointment) {
+      return res.status(400).json({ message: "This time slot is already booked" });
+    }
+
+    // Create new appointment
+    const appointment = new Appointment({
+      user_id,
+      doctor_id,
+      date,
+      time,
+      symptoms: symptoms || "",
+      notes: notes || "",
+      status: status || "Confirmed" // Admin can set status directly, default to Confirmed
+    });
+
+    await appointment.save();
+
+    // Populate appointment data for response
+    const populatedAppointment = await Appointment.findById(appointment._id)
+      .populate('user_id', 'name email phone')
+      .populate({
+        path: 'doctor_id',
+        populate: {
+          path: 'userId',
+          select: 'name email phone'
+        }
+      })
+      .lean();
+
+    res.status(201).json({
+      message: "Appointment booked successfully",
+      appointment: {
+        id: appointment._id,
+        date: new Date(appointment.date).toISOString().split('T')[0],
+        time: appointment.time,
+        status: appointment.status,
+        symptoms: appointment.symptoms,
+        notes: appointment.notes,
+        patient: {
+          id: populatedAppointment.user_id._id,
+          name: populatedAppointment.user_id.name,
+          email: populatedAppointment.user_id.email,
+          phone: populatedAppointment.user_id.phone
+        },
+        doctor: {
+          id: populatedAppointment.doctor_id._id,
+          name: populatedAppointment.doctor_id.userId?.name || "Unknown",
+          specialization: populatedAppointment.doctor_id.specialization || "Unknown"
+        }
+      }
+    });
+  } catch (error) {
+    console.error("Admin create appointment error:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
 // ===== GET Admin Dashboard Stats =====
 router.get("/dashboard", auth, async (req, res) => {
   try {
@@ -316,6 +407,60 @@ router.get("/users", auth, async (req, res) => {
     });
   } catch (error) {
     console.error("Admin get users error:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// ===== CREATE User (Admin) =====
+router.post("/users", auth, async (req, res) => {
+  try {
+    // Check if user is admin
+    if (req.userRole !== "Admin") {
+      return res.status(403).json({ message: "Only admins can access this endpoint" });
+    }
+
+    const { name, email, password, gender, phone, address, dob } = req.body;
+
+    // Validate required fields
+    if (!name || !email || !password) {
+      return res.status(400).json({ message: "Name, email, and password are required" });
+    }
+
+    // Check if email already exists
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      return res.status(400).json({ message: "Email already registered" });
+    }
+
+    // Create new user (role will be Patient by default)
+    const user = new User({
+      name,
+      email,
+      password,
+      gender: gender || undefined,
+      phone: phone || undefined,
+      address: address || undefined,
+      dob: dob || undefined,
+      role: "Patient"
+    });
+
+    await user.save();
+
+    res.status(201).json({
+      message: "User created successfully",
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        address: user.address,
+        dob: user.dob ? new Date(user.dob).toISOString().split('T')[0] : user.dob,
+        gender: user.gender,
+        role: user.role
+      }
+    });
+  } catch (error) {
+    console.error("Admin create user error:", error);
     res.status(500).json({ message: "Server error" });
   }
 });
