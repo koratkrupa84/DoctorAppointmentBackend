@@ -4,6 +4,7 @@ const User = require("../models/User");
 const Doctor = require("../models/Doctor");
 const Appointment = require("../models/Appointment");
 const Admin = require("../models/Admin");
+const Feedback = require("../models/Feedback");
 const auth = require("../middleware/auth");
 
 // ===== TEST ROUTE =====
@@ -693,6 +694,203 @@ router.delete("/:id", auth, async (req, res) => {
     res.json({ message: "Admin removed successfully" });
   } catch (error) {
     console.error("Delete admin error:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// ===== GET All Feedback (Admin) =====
+router.get("/feedback", auth, async (req, res) => {
+  try {
+    // Check if user is admin
+    if (req.userRole !== "Admin") {
+      return res.status(403).json({ message: "Only admins can access this endpoint" });
+    }
+
+    const { status } = req.query;
+
+    // Build query
+    const query = {};
+    if (status) {
+      query.status = status;
+    }
+
+    const feedbacks = await Feedback.find(query)
+      .populate('user_id', 'name email phone')
+      .populate('responded_by', 'name email')
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const formattedFeedbacks = feedbacks.map(feedback => ({
+      id: feedback._id,
+      subject: feedback.subject,
+      message: feedback.message,
+      rating: feedback.rating,
+      status: feedback.status,
+      admin_response: feedback.admin_response || "",
+      responded_at: feedback.responded_at || null,
+      user: {
+        id: feedback.user_id?._id,
+        name: feedback.user_id?.name || "Unknown",
+        email: feedback.user_id?.email || "Unknown",
+        phone: feedback.user_id?.phone || "Unknown"
+      },
+      responded_by: feedback.responded_by ? {
+        id: feedback.responded_by._id,
+        name: feedback.responded_by.name,
+        email: feedback.responded_by.email
+      } : null,
+      createdAt: feedback.createdAt,
+      updatedAt: feedback.updatedAt
+    }));
+
+    res.json({
+      feedbacks: formattedFeedbacks,
+      total: formattedFeedbacks.length
+    });
+  } catch (error) {
+    console.error("Admin get feedback error:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// ===== UPDATE Feedback Status (Admin) =====
+router.put("/feedback/:id/status", auth, async (req, res) => {
+  try {
+    // Check if user is admin
+    if (req.userRole !== "Admin") {
+      return res.status(403).json({ message: "Only admins can access this endpoint" });
+    }
+
+    const { status } = req.body;
+    const { id } = req.params;
+
+    // Validate status
+    const validStatuses = ["Pending", "Reviewed", "Resolved", "Archived"];
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({ 
+        message: "Invalid status. Valid statuses are: Pending, Reviewed, Resolved, Archived" 
+      });
+    }
+
+    const feedback = await Feedback.findByIdAndUpdate(
+      id,
+      { status },
+      { new: true, runValidators: true }
+    )
+      .populate('user_id', 'name email')
+      .lean();
+
+    if (!feedback) {
+      return res.status(404).json({ message: "Feedback not found" });
+    }
+
+    res.json({
+      message: "Feedback status updated successfully",
+      feedback: {
+        id: feedback._id,
+        subject: feedback.subject,
+        status: feedback.status,
+        user: {
+          name: feedback.user_id?.name,
+          email: feedback.user_id?.email
+        }
+      }
+    });
+  } catch (error) {
+    console.error("Admin update feedback status error:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// ===== RESPOND to Feedback (Admin) =====
+router.put("/feedback/:id/respond", auth, async (req, res) => {
+  try {
+    // Check if user is admin
+    if (req.userRole !== "Admin") {
+      return res.status(403).json({ message: "Only admins can access this endpoint" });
+    }
+
+    const { admin_response, status } = req.body;
+    const { id } = req.params;
+
+    if (!admin_response) {
+      return res.status(400).json({ message: "Admin response is required" });
+    }
+
+    // Update feedback with response
+    const updateData = {
+      admin_response,
+      responded_by: req.userId,
+      responded_at: new Date()
+    };
+
+    // Update status if provided
+    if (status) {
+      const validStatuses = ["Pending", "Reviewed", "Resolved", "Archived"];
+      if (validStatuses.includes(status)) {
+        updateData.status = status;
+      }
+    } else {
+      // Default to Reviewed if status not provided
+      updateData.status = "Reviewed";
+    }
+
+    const feedback = await Feedback.findByIdAndUpdate(
+      id,
+      updateData,
+      { new: true, runValidators: true }
+    )
+      .populate('user_id', 'name email')
+      .populate('responded_by', 'name email')
+      .lean();
+
+    if (!feedback) {
+      return res.status(404).json({ message: "Feedback not found" });
+    }
+
+    res.json({
+      message: "Response added successfully",
+      feedback: {
+        id: feedback._id,
+        subject: feedback.subject,
+        message: feedback.message,
+        admin_response: feedback.admin_response,
+        status: feedback.status,
+        responded_at: feedback.responded_at,
+        user: {
+          name: feedback.user_id?.name,
+          email: feedback.user_id?.email
+        },
+        responded_by: feedback.responded_by ? {
+          name: feedback.responded_by.name,
+          email: feedback.responded_by.email
+        } : null
+      }
+    });
+  } catch (error) {
+    console.error("Admin respond to feedback error:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// ===== DELETE Feedback (Admin) =====
+router.delete("/feedback/:id", auth, async (req, res) => {
+  try {
+    // Check if user is admin
+    if (req.userRole !== "Admin") {
+      return res.status(403).json({ message: "Only admins can access this endpoint" });
+    }
+
+    const { id } = req.params;
+
+    const feedback = await Feedback.findByIdAndDelete(id);
+    if (!feedback) {
+      return res.status(404).json({ message: "Feedback not found" });
+    }
+
+    res.json({ message: "Feedback deleted successfully" });
+  } catch (error) {
+    console.error("Admin delete feedback error:", error);
     res.status(500).json({ message: "Server error" });
   }
 });

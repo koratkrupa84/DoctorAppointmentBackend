@@ -5,9 +5,10 @@ const Admin = require("../models/Admin");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
 const auth = require("../middleware/auth");
-const Appointment = require("../models/Appointment")
+const Appointment = require("../models/Appointment");
+const Feedback = require("../models/Feedback");
 
-// ✅ Register route
+// Register route
 router.post("/register", async (req, res) => {
   try {
     const { name, email, password, gender, phone, address, dob, role } = req.body;
@@ -41,10 +42,10 @@ router.post("/register", async (req, res) => {
   } catch (error) {
     console.error("❌ Register error:", error);
     res.status(500).json({ message: "Server error" });
-  }
+  }   
 });
 
-
+// Login route
 router.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -282,6 +283,93 @@ router.put("/profile", auth, async (req, res) => {
     });
   } catch (error) {
     console.error("Patient profile update error:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// ===== SUBMIT Feedback (User) =====
+router.post("/feedback", auth, async (req, res) => {
+  try {
+    // Check if user is a patient
+    if (req.userRole !== "Patient") {
+      return res.status(403).json({ message: "Only patients can submit feedback" });
+    }
+
+    const { subject, message, rating } = req.body;
+
+    // Validate required fields
+    if (!subject || !message) {
+      return res.status(400).json({ message: "Subject and message are required" });
+    }
+
+    // Validate rating if provided
+    if (rating && (rating < 1 || rating > 5)) {
+      return res.status(400).json({ message: "Rating must be between 1 and 5" });
+    }
+
+    // Create new feedback
+    const feedback = new Feedback({
+      user_id: req.userId,
+      subject,
+      message,
+      rating: rating || 5,
+      status: "Pending"
+    });
+
+    await feedback.save();
+
+    // Populate user data for response
+    const populatedFeedback = await Feedback.findById(feedback._id)
+      .populate('user_id', 'name email')
+      .lean();
+
+    res.status(201).json({
+      message: "Feedback submitted successfully",
+      feedback: {
+        id: populatedFeedback._id,
+        subject: populatedFeedback.subject,
+        message: populatedFeedback.message,
+        rating: populatedFeedback.rating,
+        status: populatedFeedback.status,
+        createdAt: populatedFeedback.createdAt
+      }
+    });
+  } catch (error) {
+    console.error("Submit feedback error:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// ===== GET User's Feedback (User) =====
+router.get("/feedback", auth, async (req, res) => {
+  try {
+    // Check if user is a patient
+    if (req.userRole !== "Patient") {
+      return res.status(403).json({ message: "Only patients can access this endpoint" });
+    }
+
+    const feedbacks = await Feedback.find({ user_id: req.userId })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const formattedFeedbacks = feedbacks.map(feedback => ({
+      id: feedback._id,
+      subject: feedback.subject,
+      message: feedback.message,
+      rating: feedback.rating,
+      status: feedback.status,
+      admin_response: feedback.admin_response || "",
+      responded_at: feedback.responded_at || null,
+      createdAt: feedback.createdAt,
+      updatedAt: feedback.updatedAt
+    }));
+
+    res.json({
+      feedbacks: formattedFeedbacks,
+      total: formattedFeedbacks.length
+    });
+  } catch (error) {
+    console.error("Get user feedback error:", error);
     res.status(500).json({ message: "Server error" });
   }
 });
