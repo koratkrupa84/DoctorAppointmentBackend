@@ -6,6 +6,8 @@ const Doctor = require("../models/Doctor");
 const User = require("../models/User");
 const multer = require("multer");
 const path = require("path");
+const Consultation = require("../models/Consultation");
+const ConsultationMessage = require("../models/ConsultationMessage");
 let Appointment;
 try { Appointment = require("../models/Appointment"); } catch {}
 
@@ -342,6 +344,161 @@ router.post("/book-appointment", auth, async (req, res) => {
   } catch (error) {
     console.error("Error booking appointment:", error);
     res.status(500).json({ message: "Failed to book appointment" });
+  }
+});
+
+// ===== GET Doctor Consultations =====
+router.get("/consultations", auth, async (req, res) => {
+  try {
+    // Check if user is a doctor
+    if (req.userRole !== "Doctor") {
+      return res.status(403).json({ message: "Only doctors can access this endpoint" });
+    }
+
+    // Find doctor by userId
+    const doctor = await Doctor.findOne({ userId: req.userId });
+    if (!doctor) {
+      return res.status(404).json({ message: "Doctor profile not found" });
+    }
+
+    const consultations = await Consultation.find({ doctor_id: doctor._id })
+      .populate('patient_id', 'name email')
+      .sort({ updatedAt: -1 })
+      .lean();
+
+    const formattedConsultations = consultations.map(consultation => ({
+      id: consultation._id,
+      patient_name: consultation.patient_id?.name || "Unknown",
+      patient_email: consultation.patient_id?.email || "",
+      status: consultation.status,
+      subject: consultation.subject || "",
+      createdAt: consultation.createdAt,
+      updatedAt: consultation.updatedAt
+    }));
+
+    res.json({
+      consultations: formattedConsultations,
+      total: formattedConsultations.length
+    });
+  } catch (error) {
+    console.error("Get doctor consultations error:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// ===== SEND Message in Consultation (Doctor) =====
+router.post("/consultation/:consultationId/message", auth, async (req, res) => {
+  try {
+    // Check if user is a doctor
+    if (req.userRole !== "Doctor") {
+      return res.status(403).json({ message: "Only doctors can send messages" });
+    }
+
+    const { consultationId } = req.params;
+    const { message } = req.body;
+
+    if (!message || !message.trim()) {
+      return res.status(400).json({ message: "Message is required" });
+    }
+
+    // Find doctor by userId
+    const doctor = await Doctor.findOne({ userId: req.userId });
+    if (!doctor) {
+      return res.status(404).json({ message: "Doctor profile not found" });
+    }
+
+    // Check if consultation exists and belongs to doctor
+    const consultation = await Consultation.findById(consultationId);
+    if (!consultation) {
+      return res.status(404).json({ message: "Consultation not found" });
+    }
+
+    if (consultation.doctor_id.toString() !== doctor._id.toString()) {
+      return res.status(403).json({ message: "Unauthorized access to this consultation" });
+    }
+
+    // Create message
+    const consultationMessage = new ConsultationMessage({
+      consultation_id: consultationId,
+      sender_id: req.userId,
+      sender_role: 'Doctor',
+      message: message.trim()
+    });
+
+    await consultationMessage.save();
+
+    // Update consultation updatedAt
+    await Consultation.findByIdAndUpdate(consultationId, { updatedAt: new Date() });
+
+    res.status(201).json({
+      message: "Message sent successfully",
+      messageData: {
+        id: consultationMessage._id,
+        message: consultationMessage.message,
+        sender_role: consultationMessage.sender_role,
+        createdAt: consultationMessage.createdAt
+      }
+    });
+  } catch (error) {
+    console.error("Error sending message:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// ===== GET Messages for Consultation (Doctor) =====
+router.get("/consultation/:consultationId/messages", auth, async (req, res) => {
+  try {
+    // Check if user is a doctor
+    if (req.userRole !== "Doctor") {
+      return res.status(403).json({ message: "Only doctors can access this endpoint" });
+    }
+
+    const { consultationId } = req.params;
+
+    // Find doctor by userId
+    const doctor = await Doctor.findOne({ userId: req.userId });
+    if (!doctor) {
+      return res.status(404).json({ message: "Doctor profile not found" });
+    }
+
+    // Check if consultation exists and belongs to doctor
+    const consultation = await Consultation.findById(consultationId);
+    if (!consultation) {
+      return res.status(404).json({ message: "Consultation not found" });
+    }
+
+    if (consultation.doctor_id.toString() !== doctor._id.toString()) {
+      return res.status(403).json({ message: "Unauthorized access to this consultation" });
+    }
+
+    // Get all messages for this consultation
+    const messages = await ConsultationMessage.find({ consultation_id: consultationId })
+      .populate('sender_id', 'name')
+      .sort({ createdAt: 1 })
+      .lean();
+
+    const formattedMessages = messages.map(msg => ({
+      id: msg._id,
+      message: msg.message,
+      sender_role: msg.sender_role,
+      sender_name: msg.sender_id?.name || "Unknown",
+      createdAt: msg.createdAt,
+      read: msg.read
+    }));
+
+    // Mark messages as read
+    await ConsultationMessage.updateMany(
+      { consultation_id: consultationId, sender_role: 'Patient', read: false },
+      { read: true }
+    );
+
+    res.json({
+      messages: formattedMessages,
+      total: formattedMessages.length
+    });
+  } catch (error) {
+    console.error("Get consultation messages error:", error);
+    res.status(500).json({ message: "Server error" });
   }
 });
 
