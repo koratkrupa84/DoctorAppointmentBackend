@@ -44,6 +44,13 @@ router.post("/register", async (req, res) => {
       user: user
     });
 
+     // Generate JWT Token
+    const token = jwt.sign(
+      { id: user._id, role: user.role },
+      process.env.JWT_SECRET || "secretKey",
+      { expiresIn: "1d" }
+    );
+
   } catch (error) {
     console.error("❌ Register error:", error);
     res.status(500).json({ message: "Server error" });
