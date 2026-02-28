@@ -1082,6 +1082,7 @@ router.get("/lab-test-bookings", auth, async (req, res) => {
       time: booking.time,
       status: booking.status,
       notes: booking.notes || "",
+      referenceDoctor: booking.referenceDoctor || "",
       patient: {
         id: booking.user_id?._id,
         name: booking.user_id?.name || "Unknown",
@@ -1184,6 +1185,65 @@ router.delete("/lab-test-bookings/:id", auth, async (req, res) => {
     res.json({ message: "Lab test booking deleted successfully" });
   } catch (error) {
     console.error("Admin delete lab test booking error:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// ===== CREATE Lab Test Booking (Admin) =====
+router.post("/lab-test-bookings", auth, async (req, res) => {
+  try {
+    // Check if user is admin
+    if (req.userRole !== "Admin") {
+      return res.status(403).json({ message: "Only admins can access this endpoint" });
+    }
+
+    const { user_id, test_id, date, time, reference_doctor } = req.body;
+
+    // Validate required fields
+    if (!user_id || !test_id || !date || !time) {
+      return res.status(400).json({ 
+        message: "Patient, test, date, and time are required" 
+      });
+    }
+
+    // Check if patient exists
+    const patient = await User.findById(user_id);
+    if (!patient) {
+      return res.status(404).json({ message: "Patient not found" });
+    }
+
+    // Check if lab test exists
+    const labTest = await LabTest.findById(test_id);
+    if (!labTest) {
+      return res.status(404).json({ message: "Lab test not found" });
+    }
+
+    // Create new lab test booking
+    const newBooking = new LabTestBooking({
+      user_id: user_id,
+      test_id: test_id,
+      date: date,
+      time: time,
+      reference_doctor: reference_doctor || '',
+      status: 'Pending'
+    });
+
+    // Save booking
+    const savedBooking = await newBooking.save();
+
+    // Populate for response
+    const populatedBooking = await LabTestBooking.findById(savedBooking._id)
+      .populate('user_id', 'name email phone')
+      .populate('test_id', 'test_name description price')
+      .lean();
+
+    res.status(201).json({
+      message: "Lab test booking created successfully",
+      booking: populatedBooking
+    });
+
+  } catch (error) {
+    console.error("Admin create lab test booking error:", error);
     res.status(500).json({ message: "Server error" });
   }
 });

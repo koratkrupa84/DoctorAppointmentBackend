@@ -6,6 +6,7 @@ const labTestBookingSchema = new mongoose.Schema({
   date: { type: Date, required: true },
   time: { type: String, required: true },
   notes: { type: String, default: "" },
+  referenceDoctor: { type: String, default: "" },
   status: { type: String, default: "Pending" } // Pending, Confirmed, Completed, Cancelled
 }, { timestamps: true });
 

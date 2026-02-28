@@ -441,7 +441,7 @@ router.post("/book-lab-test", auth, async (req, res) => {
       return res.status(403).json({ message: "Only patients can book lab tests" });
     }
 
-    const { test_id, date, time, notes } = req.body;
+    const { test_id, date, time, notes, referenceDoctor } = req.body;
 
     if (!test_id || !date || !time) {
       return res.status(400).json({ message: "Test ID, date, and time are required" });
@@ -460,6 +460,7 @@ router.post("/book-lab-test", auth, async (req, res) => {
       date,
       time,
       notes: notes || "",
+      referenceDoctor: referenceDoctor || "",
       status: "Pending"
     });
 
@@ -501,6 +502,7 @@ router.get("/lab-test-bookings", auth, async (req, res) => {
       time: booking.time,
       status: booking.status,
       notes: booking.notes,
+      referenceDoctor: booking.referenceDoctor || "",
       test_name: booking.test_id?.test_name || "Unknown",
       description: booking.test_id?.description || "",
       price: booking.test_id?.price || 0,
